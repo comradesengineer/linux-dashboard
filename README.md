@@ -19,7 +19,7 @@ no Node, no CDN, no database, no Docker.
 
 | | **Linux Dashboard** | Netdata | Grafana + Prometheus | Cockpit |
 |---|---|---|---|---|
-| Install size | ~75 KB, 1 file | ~100 MB+ | hundreds of MB | ~30 MB |
+| Install size | ~84 KB, 1 file | ~100 MB+ | hundreds of MB | ~30 MB |
 | Dependencies | none (Python stdlib) | many | many | many |
 | RAM on a 483 MB board | ~12 MB | 100–200 MB | 200 MB+ | 50 MB+ |
 | Service start/stop/restart/enable | ✅ built in | ❌ | ❌ | ✅ |
@@ -137,7 +137,7 @@ deleting the directory.
 ### Dashboard tab
 
 - **System panel** – identity and live totals. `CPU` shows the last sample (`now`) and the
-  15 s average from the sampler.
+  average from the sampler (15 s by default, longer for bigger windows).
 - **Graph selector** – top toolbar: `Graph: 30 min` … `24 hours`. Changing it resets the
   window immediately and is saved in the config.
 - **Network card** – the dropdown chooses the interface to graph:
