@@ -129,8 +129,9 @@ sudo ./install.sh --uninstall --purge    # also delete /etc/dashboard
 ```
 
 Run the installer with `sudo`, otherwise it can only see services owned by your own user
-when it scans for cards. A `--prefix` install writes only into that directory; remove it by
-deleting the directory.
+when it scans for cards. A `--prefix` install writes only into that directory (no systemd
+unit); remove it again with `sudo ./install.sh --uninstall --prefix /opt/dash` (add
+`--purge` to delete the directory too). `./install.sh --version` prints the version.
 
 ## Using the dashboard
 
