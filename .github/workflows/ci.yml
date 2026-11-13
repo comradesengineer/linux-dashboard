@@ -58,7 +58,8 @@ jobs:
           assert "services" in c and "pin" not in c
           print("api OK")
           PY
-          curl -fsS http://127.0.0.1:7979/ | grep -q '<title>Linux Dashboard</title>'
+          curl -fsS http://127.0.0.1:7979/ -o /tmp/page.html
+          grep -q '<title>Linux Dashboard</title>' /tmp/page.html
           curl -fsS http://127.0.0.1:7979/api/net > /tmp/net.json
           python3 -c 'import json; d=json.load(open("/tmp/net.json")); assert "interfaces" in d; print("net OK")'
           curl -fsS http://127.0.0.1:7979/api/history > /tmp/hist.json
