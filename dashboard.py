@@ -359,6 +359,8 @@ def detect_services(port):
 
 
 def detect_config(port=7979, title=None, pin=""):
+    names = [n for n in _iface_names() if n != 'lo']
+    default_iface = _default_iface()
     return {
         "title": title or socket.gethostname(),
         "subtitle": "System dashboard",
@@ -366,7 +368,7 @@ def detect_config(port=7979, title=None, pin=""):
         "port": int(port),
         "bind": "0.0.0.0",
         "disk_path": "/",
-        "net_iface": "",
+        "net_iface": default_iface if default_iface in names else "",
         "history_minutes": 30,
         "protected": list(PROTECTED_DEFAULT),
         "services": detect_services(port),
@@ -451,7 +453,7 @@ def _default_iface():
 
 
 def _net_iface():
-    """Interface to graph: config override ('all', a name) or auto (default route)."""
+    """Interface to graph: 'all', a pinned interface name, or the default route."""
     try:
         cfg = load_config()
     except Exception:
@@ -462,6 +464,31 @@ def _net_iface():
     if want and want in _iface_names():
         return want
     return _default_iface()
+
+
+def pin_default_iface():
+    """Persist the default-route interface once, so the graph never jumps.
+
+    An empty ``net_iface`` means "not chosen yet": resolve it now and store the
+    concrete name. After that the selection only changes when the user changes
+    it in the UI, even if the default route later moves to another interface.
+    """
+    try:
+        cfg = load_config()
+    except Exception:
+        return ""
+    want = str(cfg.get("net_iface") or "").strip()
+    names = [n for n in _iface_names() if n != 'lo']
+    if want in ("", "auto") and names:
+        picked = _default_iface()
+        if picked in names:
+            cfg["net_iface"] = picked
+            want = picked
+            try:
+                save_config(cfg)
+            except Exception:
+                pass
+    return want
 
 
 def _iface_is_wireless(name):
@@ -1115,10 +1142,28 @@ function authHeaders() {
 
 async function api(path, method='GET', body=null) {
   const opts = {method, headers: authHeaders()};
-  if (body) opts.body = JSON.stringify(body);
-  const r = await fetch(path, opts);
+  if (body !== null) opts.body = JSON.stringify(body);
+  let r;
+  try {
+    r = await fetch(path, opts);
+  } catch (e) {
+    throw new Error('cannot reach the dashboard server');
+  }
   if (r.status === 401 && path.startsWith('/api/term')) return {ok:false, error:'locked'};
-  return r.json();
+  const text = await r.text();
+  let data = {};
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      throw new Error('unexpected response from the server (HTTP ' + r.status + ')');
+    }
+  }
+  if (!r.ok && data && data.ok !== false) {
+    data.ok = false;
+    if (!data.error) data.error = 'HTTP ' + r.status;
+  }
+  return data;
 }
 
 function toast(msg, ok=true) {
@@ -1173,37 +1218,41 @@ async function loadNet() {
   netInfo = d;
   const sel = document.getElementById('netSel');
   if (!sel) return;
-  const sig = JSON.stringify([d.selected, d.minutes,
+  const sig = JSON.stringify([d.selected, d.resolved, d.default, d.minutes,
     (d.interfaces || []).map(i => [i.name, i.ip, i.state, i.wireless])]);
   if (sig === netSig) return;
   netSig = sig;
-  const cur = d.selected || '';
   sel.innerHTML = '';
-  const auto = document.createElement('option');
-  auto.value = '';
-  const def = (d.interfaces || []).find(i => i.name === d.default);
-  auto.textContent = 'Auto' + (def ? ' · ' + def.name : '');
-  sel.appendChild(auto);
   (d.interfaces || []).forEach(i => {
     const o = document.createElement('option');
     o.value = i.name;
-    o.textContent = i.name + (i.wireless ? ' · Wi-Fi' : '') + (i.ip ? ' · ' + i.ip : '');
+    o.textContent = i.name + (i.name === d.default ? ' · default' : '')
+      + (i.wireless ? ' · Wi-Fi' : '') + (i.ip ? ' · ' + i.ip : '');
     sel.appendChild(o);
   });
   const all = document.createElement('option');
   all.value = 'all';
   all.textContent = 'All interfaces';
   sel.appendChild(all);
-  sel.value = cur;
+  const want = d.selected === 'all' ? 'all' : (d.selected || d.resolved || '');
+  if (want && want !== 'all' && !(d.interfaces || []).some(i => i.name === want)) {
+    const o = document.createElement('option');
+    o.value = want;
+    o.textContent = want + ' · unavailable (using ' + (d.resolved || 'default') + ')';
+    sel.appendChild(o);
+  }
+  if (want) sel.value = want;
   const range = document.getElementById('rangeSel');
-  if (range && !range.options.length) {
-    const opts = d.options || [10, 30, 60, 180, 360, 720, 1440];
-    opts.forEach(m => {
-      const o = document.createElement('option');
-      o.value = String(m);
-      o.textContent = m < 60 ? m + ' min' : (m / 60) + ' hour' + (m >= 120 ? 's' : '');
-      range.appendChild(o);
-    });
+  if (range) {
+    if (!range.options.length) {
+      const opts = d.options || [10, 30, 60, 180, 360, 720, 1440];
+      opts.forEach(m => {
+        const o = document.createElement('option');
+        o.value = String(m);
+        o.textContent = m < 60 ? m + ' min' : (m / 60) + ' hour' + (m >= 120 ? 's' : '');
+        range.appendChild(o);
+      });
+    }
     range.value = String(d.minutes || 30);
   }
 }
@@ -1212,7 +1261,9 @@ async function setIface(v) {
   try {
     const r = await api('/api/settings', 'POST', {net_iface: v});
     if (!r.ok) throw new Error(r.error || 'failed');
-    toast(v === 'all' ? 'Graphing all interfaces' : (v ? 'Graphing ' + v : 'Graphing the default interface'), true);
+    const label = r.net_iface === 'all' ? 'All interfaces' : r.net_iface;
+    toast('Graphing ' + label + ' (fixed until you change it)');
+    netSig = '';
     await loadNet();
     await loadHistory();
   } catch (e) {
@@ -1836,6 +1887,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return {}
 
     def do_GET(self):
+        # term/read carries its id/since in the query string; everything else
+        # is routed on the bare path (so cache-busting query strings are safe).
+        if not self.path.startswith('/api/term/read'):
+            self.path = self.path.split('?', 1)[0]
+        try:
+            self._do_GET()
+        except Exception as e:
+            try:
+                self.send_json({"ok": False, "error": "server error: %s" % e}, 500)
+            except Exception:
+                pass
+
+    def _do_GET(self):
         if self.path == '/':
             self.send_response(200)
             self.send_header('Content-Type', 'text/html; charset=utf-8')
@@ -1881,10 +1945,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 return
             self.send_json({"ok": True, "data": data, "cursor": cursor, "alive": alive})
         else:
-            self.send_response(404)
-            self.end_headers()
+            self.send_json({"ok": False, "error": "not found"}, 404)
 
     def do_POST(self):
+        self.path = self.path.split('?', 1)[0]
+        try:
+            self._do_POST()
+        except Exception as e:
+            try:
+                self.send_json({"ok": False, "error": "server error: %s" % e}, 500)
+            except Exception:
+                pass
+
+    def _do_POST(self):
         parts = self.path.strip('/').split('/')
 
         # /api/unlock
@@ -1908,10 +1981,11 @@ class Handler(http.server.BaseHTTPRequestHandler):
             changed = []
             if 'net_iface' in body:
                 want = str(body.get('net_iface') or '').strip()
-                if want == 'auto':
-                    want = ''
-                if want and want != 'all' and want not in _iface_names():
-                    self.send_json({"ok": False, "error": "unknown interface"}, 400)
+                names = [n for n in _iface_names() if n != 'lo']
+                if want in ('', 'auto', '@default'):
+                    want = _default_iface() if names else ''
+                if want != 'all' and want not in names:
+                    self.send_json({"ok": False, "error": "unknown interface: " + want}, 400)
                     return
                 cfg['net_iface'] = want
                 changed.append('net_iface')
@@ -2105,8 +2179,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                              start_new_session=True)
             return
-        self.send_response(404)
-        self.end_headers()
+        self.send_json({"ok": False, "error": "not found"}, 404)
 
     def do_OPTIONS(self):
         self.send_response(200)
@@ -2144,6 +2217,10 @@ if __name__ == '__main__':
         sys.exit(1)
     PORT = int(args.port or cfg.get("port") or PORT)
     BIND = args.bind or cfg.get("bind") or BIND
+    try:
+        pin_default_iface()
+    except Exception:
+        pass
     HIST_FILE = os.path.join(_run_dir(), "dashboard_history.json")
     TERM_LOG = os.path.join(_run_dir(), "dashboard_term.log")
 

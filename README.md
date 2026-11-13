@@ -37,8 +37,9 @@ usable on a 1-core ARM board and on ancient mobile browsers.
 - **Graphs** — CPU, RAM, disk and network RX/TX. Window selectable from **10 minutes to
   24 hours** (30 minutes by default), persisted across restarts.
 - **Network interface picker** — graph `wlan0`, `eth0`, any other interface, the interface
-  carrying the default route (auto), or **all interfaces combined**. Live IP / Wi-Fi state
-  shown in the dropdown.
+  carrying the default route, or **all interfaces combined**. Live IP / Wi-Fi state and a
+  `default` marker are shown in the dropdown. The selection is pinned: it never changes by
+  itself, even when the default route moves to another interface.
 - **Service cards** — live `active / inactive / failed` state, enabled/disabled, port, and
   start / stop / restart / enable / disable / remove. Slow SysV units are handled (90 s
   timeouts) and the result is verified against the real unit state.
@@ -142,8 +143,11 @@ unit); remove it again with `sudo ./install.sh --uninstall --prefix /opt/dash` (
 - **Graph selector** – top toolbar: `Graph: 30 min` … `24 hours`. Changing it resets the
   window immediately and is saved in the config.
 - **Network card** – the dropdown chooses the interface to graph:
-  `Auto · wlan0` (default-route interface), `wlan0 · Wi-Fi · 192.168.1.50`, `eth0`,
-  `All interfaces`. The choice is saved server-side.
+  `wlan0 · default · Wi-Fi · 192.168.1.50`, `eth0`, … or `All interfaces`. The choice is
+  saved server-side and **stays fixed** until you change it: the default-route interface is
+  pinned on first run, so the graph never jumps between interfaces by itself. If the pinned
+  interface disappears (USB adapter unplugged), the graph temporarily falls back to the
+  current default until it returns.
 - **Service cards** – `Open` opens the service URL (if one is known), the buttons act on the
   systemd unit. `Protected` cards (SSH, network managers, nginx) show no stop/disable
   buttons. `+ Add Creds` stores notes revealed only after the PIN.
@@ -170,7 +174,7 @@ not as a full terminal emulator.
   "port": 7979,
   "bind": "0.0.0.0",
   "disk_path": "/",
-  "net_iface": "",
+  "net_iface": "wlan0",
   "history_minutes": 30,
   "protected": ["ssh", "sshd", "NetworkManager", "nginx"],
   "services": [
@@ -193,7 +197,7 @@ not as a full terminal emulator.
 | `pin` | 4-digit PIN for console/credentials/reboot. Empty = console stays locked |
 | `port`, `bind` | listen address; CLI `--port` / `--bind` override |
 | `disk_path` | filesystem shown in the system panel and disk graph (e.g. `/mnt/data`) |
-| `net_iface` | interface to graph: `""` = auto (default route), `"wlan0"`, `"all"` |
+| `net_iface` | interface to graph, pinned until you change it: `"wlan0"`, `"all"`; `""` means not chosen yet and is resolved to the default route on the next start |
 | `history_minutes` | graph window in minutes: 10, 30, 60, 180, 360, 720 or 1440 |
 | `protected` | unit names that can never be stopped/disabled from the UI |
 | `services[].safe` | per-card override; `false` hides action buttons |
@@ -232,7 +236,7 @@ by `/api/unlock`).
 | GET | `/api/history` | points, interval, span, selected interface |
 | GET | `/api/net` | interfaces, current selection, range options |
 | POST | `/api/unlock` | `{"pin": "1234"}` → `{"token": "…"}` (rate-limited) |
-| POST | `/api/settings` | `{"net_iface": "eth0"}` or `{"history_minutes": 60}` |
+| POST | `/api/settings` | `{"net_iface": "eth0"}` (or `"auto"` to pin the current default) or `{"history_minutes": 60}` |
 | POST | `/api/services/{name}/{start,stop,restart,enable,disable,remove}` | not PIN-gated |
 | POST | `/api/services/add` | add a card |
 | GET/POST | `/api/term/{start,read,write,resize,close}` | token required |
