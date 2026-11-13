@@ -1,0 +1,69 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Compile
+        run: python -m py_compile dashboard.py
+
+      - name: Installer syntax
+        run: bash -n install.sh
+
+      - name: Inline JavaScript syntax
+        run: |
+          node -e "const fs=require('fs');const s=fs.readFileSync('dashboard.py','utf8');
+          const a=s.indexOf('<script>'),b=s.indexOf('</script>',a);
+          new Function(s.slice(a+8,b));console.log('JS OK')"
+
+      - name: Detect config
+        run: |
+          DASH_PIN=1234 python3 dashboard.py --detect --port 7979 > /tmp/config.json
+          python3 -m json.tool /tmp/config.json > /dev/null
+          python3 - <<'PY'
+          import json
+          c = json.load(open("/tmp/config.json"))
+          assert c["port"] == 7979
+          assert c["history_minutes"] == 30
+          assert isinstance(c["services"], list)
+          print("config OK:", len(c["services"]), "services")
+          PY
+
+      - name: Smoke test the server
+        run: |
+          python3 dashboard.py --config /tmp/config.json --port 7979 &
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:7979/api/config > /tmp/api.json && break
+            sleep 0.5
+          done
+          python3 - <<'PY'
+          import json
+          c = json.load(open("/tmp/api.json"))
+          assert "services" in c and "pin" not in c
+          print("api OK")
+          PY
+          curl -fsS http://127.0.0.1:7979/ | grep -q '<title>Linux Dashboard</title>'
+          curl -fsS http://127.0.0.1:7979/api/net > /tmp/net.json
+          python3 -c 'import json; d=json.load(open("/tmp/net.json")); assert "interfaces" in d; print("net OK")'
+          curl -fsS http://127.0.0.1:7979/api/history > /tmp/hist.json
+          python3 -c 'import json; d=json.load(open("/tmp/hist.json")); assert d["minutes"] == 30; print("history OK")'
+          curl -fsS -X POST http://127.0.0.1:7979/api/unlock -H 'Content-Type: application/json' -d '{"pin":"1234"}' > /tmp/unlock.json
+          python3 -c 'import json; d=json.load(open("/tmp/unlock.json")); assert d.get("token"); print("unlock OK")'
+          curl -fsS -X POST http://127.0.0.1:7979/api/settings -H 'Content-Type: application/json' -d '{"history_minutes":60}' > /tmp/set.json
+          python3 -c 'import json; d=json.load(open("/tmp/set.json")); assert d["minutes"] == 60; print("settings OK")'

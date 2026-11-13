@@ -1,0 +1,55 @@
+{
+  "title": "My Server",
+  "subtitle": "System dashboard",
+  "pin": "1234",
+  "port": 7979,
+  "bind": "0.0.0.0",
+  "disk_path": "/",
+  "net_iface": "",
+  "history_minutes": 30,
+  "protected": [
+    "ssh",
+    "sshd",
+    "systemd-networkd",
+    "systemd-resolved",
+    "systemd-logind",
+    "systemd-journald",
+    "systemd-udevd",
+    "dbus",
+    "dbus-broker",
+    "networking",
+    "NetworkManager",
+    "iwd",
+    "wpa_supplicant",
+    "dashboard"
+  ],
+  "services": [
+    {
+      "name": "nginx",
+      "label": "nginx",
+      "port": 80,
+      "url": "http://myhost",
+      "icon": "NGI",
+      "desc": "listening on 80",
+      "safe": true
+    },
+    {
+      "name": "ssh",
+      "label": "SSH",
+      "port": 22,
+      "url": "",
+      "icon": "SSH",
+      "desc": "listening on 22",
+      "safe": false
+    },
+    {
+      "name": "smbd",
+      "label": "Samba",
+      "port": 445,
+      "url": "",
+      "icon": "SAM",
+      "desc": "listening on 445",
+      "safe": true
+    }
+  ]
+}
